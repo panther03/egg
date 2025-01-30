@@ -1065,10 +1065,10 @@ impl<L: Language, N: Analysis<L>> EGraph<L, N> {
     pub fn equivs(&self, expr1: &RecExpr<L>, expr2: &RecExpr<L>) -> Vec<Id> {
         let pat1 = Pattern::from(expr1);
         let pat2 = Pattern::from(expr2);
-        let matches1 = pat1.search(self);
+        let matches1 = pat1.search(self, None);
         trace!("Matches1: {:?}", matches1);
 
-        let matches2 = pat2.search(self);
+        let matches2 = pat2.search(self, None);
         trace!("Matches2: {:?}", matches2);
 
         let mut equiv_eclasses = Vec::new();
@@ -1224,7 +1224,7 @@ impl<L: Language + Display, N: Analysis<L>> EGraph<L, N> {
 
         for (i, goal) in goals.iter().enumerate() {
             println!("Trying to prove goal {}: {}", i, goal.pretty(40));
-            let matches = goal.search_eclass(self, id);
+            let matches = goal.search_eclass(self, id, None);
             if matches.is_none() {
                 let best = Extractor::new(self, AstSize).find_best(id).1;
                 panic!(

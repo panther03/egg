@@ -67,6 +67,12 @@ impl From<usize> for Id {
     }
 }
 
+impl Into<u32> for Id {
+    fn into(self) -> u32 {
+        self.0
+    }
+}
+
 impl From<Id> for usize {
     fn from(id: Id) -> usize {
         id.0 as usize

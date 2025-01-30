@@ -68,7 +68,7 @@ pub fn test_runner<L, A>(
         runner = runner.with_hook(move |r| {
             if goals
                 .iter()
-                .all(|g: &Pattern<_>| g.search_eclass(&r.egraph, id).is_some())
+                .all(|g: &Pattern<_>| g.search_eclass(&r.egraph, id, None).is_some())
             {
                 Err("Proved all goals".into())
             } else {
@@ -94,7 +94,7 @@ pub fn test_runner<L, A>(
 
         if runner.egraph.are_explanations_enabled() {
             for goal in goals {
-                let matches = goal.search_eclass(&runner.egraph, id).unwrap();
+                let matches = goal.search_eclass(&runner.egraph, id, None).unwrap();
                 let subst = matches.substs[0].clone();
                 // don't optimize the length for the first egraph
                 runner = runner.without_explanation_length_optimization();
@@ -199,7 +199,7 @@ where
         let mut times: Vec<u128> = (0..n_samples)
             .map(|_| {
                 let start = Instant::now();
-                let matches = pat.search(&egraph);
+                let matches = pat.search(&egraph, None);
                 let time = start.elapsed();
                 let _n_results = matches.iter().map(|m| m.substs.len()).sum::<usize>();
                 time.as_nanos()

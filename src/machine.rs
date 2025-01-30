@@ -1,5 +1,5 @@
 use crate::*;
-use std::result;
+use std::{result, time::Instant};
 
 type Result = result::Result<(), ()>;
 type RunResult = result::Result<bool, ()>;
@@ -9,6 +9,7 @@ struct Machine {
     reg: Vec<Id>,
     // a buffer to re-use for lookups
     lookup: Vec<Id>,
+    deadline: Option<Instant>
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -116,6 +117,11 @@ impl Machine {
     L: Language,
     N: Analysis<L>,
     {
+        if let Some(deadline) = self.deadline {
+            if Instant::now() >= deadline {  
+                return Err(())
+            }
+        }
         let mut instructions = instructions.iter();
         while let Some(instruction) = instructions.next() {
             match instruction {
@@ -342,7 +348,6 @@ impl<L: Language> Compiler<L> {
             }
         }
         self.next_reg = next_out;
-        dbg!(&self.instructions);
     }
     
     fn extract(self) -> Program<L> {
@@ -379,6 +384,7 @@ impl<L: Language> Program<L> {
         egraph: &EGraph<L, A>,
         eclass: Id,
         mut limit: usize,
+        deadline: Option<Instant>
     ) -> Vec<Subst>
     where
     A: Analysis<L>,
@@ -390,6 +396,7 @@ impl<L: Language> Program<L> {
         }
         
         let mut machine = Machine::default();
+        machine.deadline = deadline;
         assert_eq!(machine.reg.len(), 0);
         machine.reg.push(eclass);
         

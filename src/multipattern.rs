@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::time::Instant;
 use thiserror::Error;
 
 use crate::*;
@@ -106,6 +107,7 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for MultiPattern<L> {
         egraph: &EGraph<L, A>,
         eclass: Id,
         limit: usize,
+        deadline: Option<Instant>
     ) -> Option<SearchMatches<L>> {
         match self.asts.as_slice() {
             [] => panic!("empty multipattern"),
@@ -118,7 +120,7 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for MultiPattern<L> {
                 }
             }
         }
-        let substs = self.program.run_with_limit(egraph, eclass, limit);
+        let substs = self.program.run_with_limit(egraph, eclass, limit, deadline);
         if substs.is_empty() {
             None
         } else {
@@ -241,7 +243,7 @@ mod tests {
 
         let n_matches = |multipattern: &str| -> usize {
             let mp: MultiPattern<S> = multipattern.parse().unwrap();
-            mp.n_matches(&egraph)
+            mp.n_matches(&egraph, None)
         };
 
         assert_eq!(n_matches("?x = (f a a),   ?y = (f ?c b)"), 1);

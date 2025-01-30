@@ -3,6 +3,7 @@ use log::*;
 use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
+use std::time::Instant;
 use std::{convert::TryFrom, str::FromStr};
 
 use thiserror::Error;
@@ -297,13 +298,13 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for Pattern<L> {
         Some(&self.ast)
     }
 
-    fn search_with_limit(&self, egraph: &EGraph<L, A>, limit: usize) -> Vec<SearchMatches<L>> {
+    fn search_with_limit(&self, egraph: &EGraph<L, A>, limit: usize, deadline: Option<Instant>) -> Vec<SearchMatches<L>> {
         match self.ast.last().unwrap() {
             ENodeOrVar::ENode(e) => {
                 let key = e.discriminant();
                 match egraph.classes_for_op(&key) {
                     None => vec![],
-                    Some(ids) => rewrite::search_eclasses_with_limit(self, egraph, ids, limit),
+                    Some(ids) => rewrite::search_eclasses_with_limit(self, egraph, ids, limit, deadline),
                 }
             }
             ENodeOrVar::Var(_) => rewrite::search_eclasses_with_limit(
@@ -311,6 +312,7 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for Pattern<L> {
                 egraph,
                 egraph.classes().map(|e| e.id),
                 limit,
+                deadline
             ),
         }
     }
@@ -320,8 +322,9 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for Pattern<L> {
         egraph: &EGraph<L, A>,
         eclass: Id,
         limit: usize,
+        deadline: Option<Instant>
     ) -> Option<SearchMatches<L>> {
-        let substs = self.program.run_with_limit(egraph, eclass, limit);
+        let substs = self.program.run_with_limit(egraph, eclass, limit, deadline);
         if substs.is_empty() {
             None
         } else {
@@ -437,6 +440,8 @@ pub(crate) fn apply_pat<L: Language, A: Analysis<L>>(
 #[cfg(test)]
 mod tests {
 
+    use std::time::Instant;
+
     use crate::{SymbolLang as S, *};
 
     type EGraph = crate::EGraph<S, ()>;
@@ -459,7 +464,7 @@ mod tests {
             "(+ ?a ?b)" => "(+ ?b ?a)"
         );
 
-        let matches = commute_plus.search(&egraph);
+        let matches = commute_plus.search(&egraph, None);
         let n_matches: usize = matches.iter().map(|m| m.substs.len()).sum();
         assert_eq!(n_matches, 2, "matches is wrong: {:#?}", matches);
 
@@ -495,7 +500,7 @@ mod tests {
         egraph.add_expr(&"(h (foo a b) 0 0)".parse().unwrap());
         egraph.rebuild();
 
-        let n_matches = |s: &str| s.parse::<Pattern<S>>().unwrap().n_matches(&egraph);
+        let n_matches = |s: &str| s.parse::<Pattern<S>>().unwrap().n_matches(&egraph, None);
 
         assert_eq!(n_matches("(f ?x ?y)"), 3);
         assert_eq!(n_matches("(f ?x ?x)"), 1);
@@ -519,7 +524,7 @@ mod tests {
         let len = |m: &Vec<SearchMatches<S>>| -> usize { m.iter().map(|m| m.substs.len()).sum() };
 
         let pat = &"(+ ?x (+ ?y ?z))".parse::<Pattern<S>>().unwrap();
-        let m = pat.search(egraph);
+        let m = pat.search(egraph, None);
         let match_size = 2100;
         //assert_eq!(len(&m), match_size);
 
@@ -529,13 +534,13 @@ mod tests {
         //}
 
         let id = egraph.lookup_expr(init_expr).unwrap();
-        let m = pat.search_eclass(egraph, id).unwrap();
+        let m = pat.search_eclass(egraph, id, None).unwrap();
         let match_size = 540;
         dbg!(m.substs.len());
         assert_eq!(m.substs.len(), match_size);
 
         for limit in [1, 10, 100, 1000] {
-            let m1 = pat.search_eclass_with_limit(egraph, id, limit).unwrap();
+            let m1 = pat.search_eclass_with_limit(egraph, id, limit, None).unwrap();
             assert_eq!(m1.substs.len(), usize::min(limit, match_size));
         }
     }

@@ -1,6 +1,7 @@
 use pattern::apply_pat;
 use std::fmt::{self, Debug, Display};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::*;
 
@@ -80,15 +81,15 @@ impl<L: Language, N: Analysis<L>> Rewrite<L, N> {
     /// Call [`search`] on the [`Searcher`].
     ///
     /// [`search`]: Searcher::search()
-    pub fn search(&self, egraph: &EGraph<L, N>) -> Vec<SearchMatches<L>> {
-        self.searcher.search(egraph)
+    pub fn search(&self, egraph: &EGraph<L, N>, deadline: Option<Instant>) -> Vec<SearchMatches<L>> {
+        self.searcher.search(egraph, deadline)
     }
 
     /// Call [`search_with_limit`] on the [`Searcher`].
     ///
     /// [`search_with_limit`]: Searcher::search_with_limit()
-    pub fn search_with_limit(&self, egraph: &EGraph<L, N>, limit: usize) -> Vec<SearchMatches<L>> {
-        self.searcher.search_with_limit(egraph, limit)
+    pub fn search_with_limit(&self, egraph: &EGraph<L, N>, limit: usize, deadline: Option<Instant>) -> Vec<SearchMatches<L>> {
+        self.searcher.search_with_limit(egraph, limit, deadline)
     }
 
     /// Call [`apply_matches`] on the [`Applier`].
@@ -103,8 +104,9 @@ impl<L: Language, N: Analysis<L>> Rewrite<L, N> {
     #[cfg(test)]
     pub(crate) fn run(&self, egraph: &mut EGraph<L, N>) -> Vec<Id> {
         let start = crate::util::Instant::now();
+        let deadline = start + Duration::from_secs(10);
 
-        let matches = self.search(egraph);
+        let matches = self.search(egraph, deadline);
         log::debug!("Found rewrite {} {} times", self.name, matches.len());
 
         let ids = self.apply(egraph, &matches);
@@ -128,6 +130,7 @@ pub(crate) fn search_eclasses_with_limit<'a, I, S, L, N>(
     egraph: &EGraph<L, N>,
     eclasses: I,
     mut limit: usize,
+    deadline: Option<Instant>
 ) -> Vec<SearchMatches<'a, L>>
 where
     L: Language,
@@ -137,10 +140,10 @@ where
 {
     let mut ms = vec![];
     for eclass in eclasses {
-        if limit == 0 {
+        if limit == 0 || (deadline.is_some() && Instant::now() > deadline.unwrap()) {
             break;
-        }
-        match searcher.search_eclass_with_limit(egraph, eclass, limit) {
+        }        
+        match searcher.search_eclass_with_limit(egraph, eclass, limit, deadline) {
             None => continue,
             Some(m) => {
                 let len = m.substs.len();
@@ -166,8 +169,8 @@ where
 {
     /// Search one eclass, returning None if no matches can be found.
     /// This should not return a SearchMatches with no substs.
-    fn search_eclass(&self, egraph: &EGraph<L, N>, eclass: Id) -> Option<SearchMatches<L>> {
-        self.search_eclass_with_limit(egraph, eclass, usize::MAX)
+    fn search_eclass(&self, egraph: &EGraph<L, N>, eclass: Id, deadline: Option<Instant>) -> Option<SearchMatches<L>> {
+        self.search_eclass_with_limit(egraph, eclass, usize::MAX, deadline)
     }
 
     /// Similar to [`search_eclass`], but return at most `limit` many matches.
@@ -182,25 +185,26 @@ where
         egraph: &EGraph<L, N>,
         eclass: Id,
         limit: usize,
+        deadline: Option<Instant>
     ) -> Option<SearchMatches<L>>;
 
     /// Search the whole [`EGraph`], returning a list of all the
     /// [`SearchMatches`] where something was found.
     /// This just calls [`Searcher::search_with_limit`] with a big limit.
-    fn search(&self, egraph: &EGraph<L, N>) -> Vec<SearchMatches<L>> {
-        self.search_with_limit(egraph, usize::MAX)
+    fn search(&self, egraph: &EGraph<L, N>, deadline: Option<Instant>) -> Vec<SearchMatches<L>> {
+        self.search_with_limit(egraph, usize::MAX, deadline)
     }
 
     /// Similar to [`search`], but return at most `limit` many matches.
     ///
     /// [`search`]: Searcher::search
-    fn search_with_limit(&self, egraph: &EGraph<L, N>, limit: usize) -> Vec<SearchMatches<L>> {
-        search_eclasses_with_limit(self, egraph, egraph.classes().map(|e| e.id), limit)
+    fn search_with_limit(&self, egraph: &EGraph<L, N>, limit: usize, deadline: Option<Instant>) -> Vec<SearchMatches<L>> {
+        search_eclasses_with_limit(self, egraph, egraph.classes().map(|e| e.id), limit, deadline)
     }
 
     /// Returns the number of matches in the e-graph
-    fn n_matches(&self, egraph: &EGraph<L, N>) -> usize {
-        self.search(egraph).iter().map(|m| m.substs.len()).sum()
+    fn n_matches(&self, egraph: &EGraph<L, N>, deadline: Option<Instant>) -> usize {
+        self.search(egraph, deadline).iter().map(|m| m.substs.len()).sum()
     }
 
     /// For patterns, return the ast directly as a reference

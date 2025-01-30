@@ -1,4 +1,5 @@
 use std::fmt::{self, Debug, Formatter};
+use std::time::Instant;
 
 use log::*;
 
@@ -692,8 +693,9 @@ where
         iteration: usize,
         egraph: &EGraph<L, N>,
         rewrite: &'a Rewrite<L, N>,
+        deadline: Option<Instant>
     ) -> Vec<SearchMatches<'a, L>> {
-        rewrite.search(egraph)
+        rewrite.search(egraph, deadline)
     }
 
     /// A hook allowing you to customize rewrite searching behavior
@@ -739,8 +741,9 @@ where
         limits: &RunnerLimits,
     ) -> RunnerResult<Vec<Vec<SearchMatches<'a, L>>>> {
         let mut matches = Vec::new();
+        let deadline = limits.start_time.and_then(|s| Some(s + limits.time_limit));
         for rw in rewrites {
-            let ms = self.search_rewrite(iteration, egraph, rw);
+            let ms = self.search_rewrite(iteration, egraph, rw, deadline);
             matches.push(ms);
             limits.check_limits(iteration, egraph)?;
         }
@@ -923,6 +926,7 @@ where
         iteration: usize,
         egraph: &EGraph<L, N>,
         rewrite: &'a Rewrite<L, N>,
+        deadline: Option<Instant>
     ) -> Vec<SearchMatches<'a, L>> {
         let stats = self.rule_stats(rewrite.name);
 
@@ -938,7 +942,7 @@ where
             .match_limit
             .checked_shl(stats.times_banned as u32)
             .unwrap();
-        let matches = rewrite.search_with_limit(egraph, threshold.saturating_add(1));
+        let matches = rewrite.search_with_limit(egraph, threshold.saturating_add(1), deadline);
         let total_len: usize = matches.iter().map(|m| m.substs.len()).sum();
         if total_len > threshold {
             let ban_length = stats.ban_length << stats.times_banned;
