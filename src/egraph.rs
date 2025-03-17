@@ -1,4 +1,4 @@
-use crate::*;
+use crate::{machine::MatcherOpts, *};
 use std::{
     borrow::BorrowMut,
     fmt::{self, Debug, Display},
@@ -1065,10 +1065,11 @@ impl<L: Language, N: Analysis<L>> EGraph<L, N> {
     pub fn equivs(&self, expr1: &RecExpr<L>, expr2: &RecExpr<L>) -> Vec<Id> {
         let pat1 = Pattern::from(expr1);
         let pat2 = Pattern::from(expr2);
-        let matches1 = pat1.search(self, None);
+        let opts = MatcherOpts::default();
+        let matches1 = pat1.search(self, &opts);
         trace!("Matches1: {:?}", matches1);
 
-        let matches2 = pat2.search(self, None);
+        let matches2 = pat2.search(self, &opts);
         trace!("Matches2: {:?}", matches2);
 
         let mut equiv_eclasses = Vec::new();
@@ -1222,9 +1223,10 @@ impl<L: Language + Display, N: Analysis<L>> EGraph<L, N> {
         let (cost, best) = Extractor::new(self, AstSize).find_best(id);
         println!("End ({}): {}", cost, best.pretty(80));
 
+        let opts = MatcherOpts::default();
         for (i, goal) in goals.iter().enumerate() {
             println!("Trying to prove goal {}: {}", i, goal.pretty(40));
-            let matches = goal.search_eclass(self, id, None);
+            let matches = goal.search_eclass(self, id, &opts);
             if matches.is_none() {
                 let best = Extractor::new(self, AstSize).find_best(id).1;
                 panic!(

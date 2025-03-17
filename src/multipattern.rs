@@ -1,7 +1,7 @@
 use std::str::FromStr;
-use std::time::Instant;
 use thiserror::Error;
 
+use crate::machine::MatcherOpts;
 use crate::*;
 
 /// A set of open expressions bound to variables.
@@ -107,7 +107,7 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for MultiPattern<L> {
         egraph: &EGraph<L, A>,
         eclass: Id,
         limit: usize,
-        deadline: Option<Instant>
+        opts: &MatcherOpts
     ) -> Option<SearchMatches<L>> {
         match self.asts.as_slice() {
             [] => panic!("empty multipattern"),
@@ -120,7 +120,7 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for MultiPattern<L> {
                 }
             }
         }
-        let substs = self.program.run_with_limit(egraph, eclass, limit, deadline);
+        let substs = self.program.run_with_limit(egraph, eclass, limit, opts);
         if substs.is_empty() {
             None
         } else {

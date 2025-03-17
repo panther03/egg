@@ -1,15 +1,21 @@
 use crate::*;
 use std::{result, time::Instant};
 
-type Result = result::Result<(), ()>;
+
 type RunResult = result::Result<bool, ()>;
+
+#[derive(Default,Clone)]
+pub struct MatcherOpts {
+    pub deadline: Option<Instant>,
+    pub comm_matching: bool
+}
 
 #[derive(Default)]
 struct Machine {
     reg: Vec<Id>,
     // a buffer to re-use for lookups
     lookup: Vec<Id>,
-    deadline: Option<Instant>
+    opts: MatcherOpts
 }
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -117,8 +123,9 @@ impl Machine {
     L: Language,
     N: Analysis<L>,
     {
-        if let Some(deadline) = self.deadline {
+        if let Some(deadline) = self.opts.deadline {
             if Instant::now() >= deadline {  
+                dbg!("a");
                 return Err(())
             }
         }
@@ -128,7 +135,7 @@ impl Machine {
                 Instruction::Bind { i, out, node } => {
                     let remaining_instructions = instructions.as_slice();
                     return for_each_matching_node(&egraph[self.reg(*i)], node, |matched| {
-                        if matched.len() == 2 {
+                        if matched.len() == 2 && self.opts.comm_matching {
                             let start = out.0 as usize;
                             self.reg.truncate(start);
                             self.reg.push(Default::default());
@@ -286,7 +293,7 @@ impl<L: Language> Compiler<L> {
         self.load_pattern(pattern);
         let root = pattern.root();
 
-        let last_i = pattern.as_ref().len() - 1;
+        //let last_i = pattern.as_ref().len() - 1;
         
         let mut next_out = self.next_reg;
         
@@ -384,7 +391,7 @@ impl<L: Language> Program<L> {
         egraph: &EGraph<L, A>,
         eclass: Id,
         mut limit: usize,
-        deadline: Option<Instant>
+        opts: &MatcherOpts
     ) -> Vec<Subst>
     where
     A: Analysis<L>,
@@ -396,7 +403,7 @@ impl<L: Language> Program<L> {
         }
         
         let mut machine = Machine::default();
-        machine.deadline = deadline;
+        machine.opts = opts.clone();
         assert_eq!(machine.reg.len(), 0);
         machine.reg.push(eclass);
         

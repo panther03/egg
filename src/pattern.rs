@@ -3,11 +3,11 @@ use log::*;
 use std::borrow::Cow;
 use std::convert::TryInto;
 use std::fmt::{self, Display};
-use std::time::Instant;
 use std::{convert::TryFrom, str::FromStr};
 
 use thiserror::Error;
 
+use crate::machine::MatcherOpts;
 use crate::*;
 
 /// A pattern that can function as either a [`Searcher`] or [`Applier`].
@@ -298,13 +298,13 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for Pattern<L> {
         Some(&self.ast)
     }
 
-    fn search_with_limit(&self, egraph: &EGraph<L, A>, limit: usize, deadline: Option<Instant>) -> Vec<SearchMatches<L>> {
+    fn search_with_limit(&self, egraph: &EGraph<L, A>, limit: usize, opts: &MatcherOpts) -> Vec<SearchMatches<L>> {
         match self.ast.last().unwrap() {
             ENodeOrVar::ENode(e) => {
                 let key = e.discriminant();
                 match egraph.classes_for_op(&key) {
                     None => vec![],
-                    Some(ids) => rewrite::search_eclasses_with_limit(self, egraph, ids, limit, deadline),
+                    Some(ids) => rewrite::search_eclasses_with_limit(self, egraph, ids, limit, opts),
                 }
             }
             ENodeOrVar::Var(_) => rewrite::search_eclasses_with_limit(
@@ -312,7 +312,7 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for Pattern<L> {
                 egraph,
                 egraph.classes().map(|e| e.id),
                 limit,
-                deadline
+                opts
             ),
         }
     }
@@ -322,9 +322,9 @@ impl<L: Language, A: Analysis<L>> Searcher<L, A> for Pattern<L> {
         egraph: &EGraph<L, A>,
         eclass: Id,
         limit: usize,
-        deadline: Option<Instant>
+        opts: &MatcherOpts
     ) -> Option<SearchMatches<L>> {
-        let substs = self.program.run_with_limit(egraph, eclass, limit, deadline);
+        let substs = self.program.run_with_limit(egraph, eclass, limit, opts);
         if substs.is_empty() {
             None
         } else {

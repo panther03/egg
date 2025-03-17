@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use log::*;
 
+use crate::machine::MatcherOpts;
 use crate::*;
 
 /** Faciliates running rewrites over an [`EGraph`].
@@ -154,6 +155,9 @@ pub struct Runner<L: Language, N: Analysis<L>, IterData = ()> {
 
     limits: RunnerLimits,
     scheduler: Box<dyn RewriteScheduler<L, N>>,
+
+    /// Use commutative matcher?
+    pub comm_matching: bool
 }
 
 /// Describes the limits that would stop a [`Runner`].
@@ -163,6 +167,7 @@ pub struct RunnerLimits {
     node_limit: usize,
     time_limit: Duration,
     start_time: Option<Instant>,
+    strict_deadline: bool
 }
 
 impl RunnerLimits {
@@ -215,7 +220,8 @@ where
             stop_reason,
             hooks,
             limits,
-            scheduler: _,
+            scheduler: _,   
+            comm_matching: _
         } = self;
 
         f.debug_struct("Runner")
@@ -344,6 +350,7 @@ where
                 node_limit: 10_000,
                 time_limit: Duration::from_secs(5),
                 start_time: None,
+                strict_deadline: false
             },
             egraph: EGraph::new(analysis),
             roots: vec![],
@@ -351,6 +358,7 @@ where
             stop_reason: None,
             hooks: vec![],
             scheduler: Box::new(BackoffScheduler::default()),
+            comm_matching: true
         }
     }
 
@@ -369,6 +377,18 @@ where
     /// Sets the runner time limit. Default: 5 seconds
     pub fn with_time_limit(mut self, time_limit: Duration) -> Self {
         self.limits.time_limit = time_limit;
+        self
+    }
+
+    /// Enables strict time limits while running matching
+    pub fn with_strict_deadline(mut self) -> Self {
+        self.limits.strict_deadline = true;
+        self
+    }
+
+    /// Disables commutative matcher (on by default)
+    pub fn without_comm_matching(mut self) -> Self {
+        self.comm_matching = false;
         self
     }
 
@@ -555,7 +575,7 @@ where
         result = result.and_then(|_| {
             matches = self
                 .scheduler
-                .search_rewrites(i, &self.egraph, rules, &self.limits)?;
+                .search_rewrites(i, &self.egraph, rules, &self.limits, self.comm_matching)?;
             Ok(())
             // rules.iter().try_for_each(|rw| {
             //     let ms = self.scheduler.search_rewrite(i, &self.egraph, rw);
@@ -693,9 +713,9 @@ where
         iteration: usize,
         egraph: &EGraph<L, N>,
         rewrite: &'a Rewrite<L, N>,
-        deadline: Option<Instant>
+        opts: &MatcherOpts
     ) -> Vec<SearchMatches<'a, L>> {
-        rewrite.search(egraph, deadline)
+        rewrite.search(egraph, opts)
     }
 
     /// A hook allowing you to customize rewrite searching behavior
@@ -739,11 +759,13 @@ where
         egraph: &EGraph<L, N>,
         rewrites: &[&'a Rewrite<L, N>],
         limits: &RunnerLimits,
+        comm_matching: bool,
     ) -> RunnerResult<Vec<Vec<SearchMatches<'a, L>>>> {
         let mut matches = Vec::new();
-        let deadline = limits.start_time.and_then(|s| Some(s + limits.time_limit));
+        let deadline = if limits.strict_deadline {limits.start_time.and_then(|s| Some(s + limits.time_limit))} else {None};
+        let opts = MatcherOpts { comm_matching, deadline };
         for rw in rewrites {
-            let ms = self.search_rewrite(iteration, egraph, rw, deadline);
+            let ms = self.search_rewrite(iteration, egraph, rw, &opts);
             matches.push(ms);
             limits.check_limits(iteration, egraph)?;
         }
@@ -926,7 +948,7 @@ where
         iteration: usize,
         egraph: &EGraph<L, N>,
         rewrite: &'a Rewrite<L, N>,
-        deadline: Option<Instant>
+        opts: &MatcherOpts
     ) -> Vec<SearchMatches<'a, L>> {
         let stats = self.rule_stats(rewrite.name);
 
@@ -942,7 +964,7 @@ where
             .match_limit
             .checked_shl(stats.times_banned as u32)
             .unwrap();
-        let matches = rewrite.search_with_limit(egraph, threshold.saturating_add(1), deadline);
+        let matches = rewrite.search_with_limit(egraph, threshold.saturating_add(1), opts);
         let total_len: usize = matches.iter().map(|m| m.substs.len()).sum();
         if total_len > threshold {
             let ban_length = stats.ban_length << stats.times_banned;

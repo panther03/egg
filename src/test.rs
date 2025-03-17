@@ -6,7 +6,7 @@ These are not considered part of the public api.
 use num_traits::identities::Zero;
 use std::{fmt::Display, fs::File, io::Write, path::PathBuf};
 
-use crate::*;
+use crate::{machine::MatcherOpts, *};
 
 pub fn env_var<T>(s: &str) -> Option<T>
 where
@@ -63,12 +63,13 @@ pub fn test_runner<L, A>(
     // away
     let id = runner.egraph.find(*runner.roots.last().unwrap());
 
+    let opts = MatcherOpts::default();
     if check_fn.is_none() {
         let goals = goals.to_vec();
         runner = runner.with_hook(move |r| {
             if goals
                 .iter()
-                .all(|g: &Pattern<_>| g.search_eclass(&r.egraph, id, None).is_some())
+                .all(|g: &Pattern<_>| g.search_eclass(&r.egraph, id, &opts).is_some())
             {
                 Err("Proved all goals".into())
             } else {
@@ -93,8 +94,9 @@ pub fn test_runner<L, A>(
         }
 
         if runner.egraph.are_explanations_enabled() {
+            let opts = MatcherOpts::default();
             for goal in goals {
-                let matches = goal.search_eclass(&runner.egraph, id, None).unwrap();
+                let matches = goal.search_eclass(&runner.egraph, id, &opts).unwrap();
                 let subst = matches.substs[0].clone();
                 // don't optimize the length for the first egraph
                 runner = runner.without_explanation_length_optimization();
@@ -195,11 +197,12 @@ where
 
     let get_len = |pat: &Pattern<L>| pat.to_string().len();
     let max_width = patterns.iter().map(get_len).max().unwrap_or(0);
+    let opts = MatcherOpts::default();
     for pat in &patterns {
         let mut times: Vec<u128> = (0..n_samples)
             .map(|_| {
                 let start = Instant::now();
-                let matches = pat.search(&egraph, None);
+                let matches = pat.search(&egraph, &opts);
                 let time = start.elapsed();
                 let _n_results = matches.iter().map(|m| m.substs.len()).sum::<usize>();
                 time.as_nanos()
