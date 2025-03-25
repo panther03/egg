@@ -125,7 +125,6 @@ impl Machine {
     {
         if let Some(deadline) = self.opts.deadline {
             if Instant::now() >= deadline {  
-                dbg!("a");
                 return Err(())
             }
         }
