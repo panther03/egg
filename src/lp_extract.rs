@@ -1,7 +1,6 @@
 use coin_cbc::{Col, Model, Sense};
 
 use crate::*;
-
 /// A cost function to be used by an [`LpExtractor`].
 #[cfg_attr(docsrs, doc(cfg(feature = "lp")))]
 pub trait LpCostFunction<L: Language, N: Analysis<L>> {
@@ -59,12 +58,14 @@ pub struct LpExtractor<'a, L: Language, N: Analysis<L>> {
     egraph: &'a EGraph<L, N>,
     model: Model,
     vars: HashMap<Id, ClassVars>,
+    depth_bound: usize
 }
 
 struct ClassVars {
     active: Col,
     order: Col,
     nodes: Vec<Col>,
+    node_depths: Vec<Col>
 }
 
 impl<'a, L, N> LpExtractor<'a, L, N>
@@ -72,9 +73,30 @@ where
     L: Language,
     N: Analysis<L>,
 {
+    fn filter_dead(egraph: &EGraph<L,N>, roots: &[Id]) -> HashSet<Id> {
+        let mut reachable: HashSet<Id> = roots.iter().map(|i| *i).collect();
+        let mut did_something = true;
+        while did_something {
+            did_something = false;
+            for class in egraph.classes() {
+                if !reachable.contains(&class.id) {
+                    continue;
+                }
+                for node in &class.nodes {
+                    for c in node.children() {
+                        if !reachable.contains(c) {
+                            reachable.insert(egraph.find(*c));
+                            did_something = true;
+                        }
+                    }
+                }
+            }
+        }
+        reachable
+    }
     /// Create an [`LpExtractor`] using costs from the given [`LpCostFunction`].
     /// See those docs for details.
-    pub fn new<CF>(egraph: &'a EGraph<L, N>, mut cost_function: CF) -> Self
+    pub fn new<CF>(egraph: &'a EGraph<L, N>, mut cost_function: CF, roots: &[Id], depth_bound: usize) -> Self
     where
         CF: LpCostFunction<L, N>,
     {
@@ -82,13 +104,18 @@ where
 
         let mut model = Model::default();
 
+        let alive = Self::filter_dead(egraph, roots);
+        dbg!(alive.len());
+
         let vars: HashMap<Id, ClassVars> = egraph
             .classes()
+            .filter(|c| alive.contains(&c.id))
             .map(|class| {
                 let cvars = ClassVars {
                     active: model.add_binary(),
                     order: model.add_col(),
                     nodes: class.nodes.iter().map(|_| model.add_binary()).collect(),
+                    node_depths: class.nodes.iter().map(|_| model.add_integer()).collect()
                 };
                 model.set_col_upper(cvars.order, max_order);
                 (class.id, cvars)
@@ -126,12 +153,39 @@ where
                     model.set_row_upper(row, 0.0);
                     model.set_weight(row, node_active, 1.0);
                     model.set_weight(row, child_active, -1.0);
+
+                    for (child_i, child_n) in vars[child].node_depths.iter().enumerate() {
+                        let row = model.add_row();
+                        model.set_row_upper(row, depth_bound as f64);
+                        model.set_weight(row, class.node_depths[i], -1.0);
+                        model.set_weight(row, *child_n, 1.0);
+                        model.set_weight(row, vars[child].nodes[child_i], depth_bound as f64);
+                        model.set_weight(row, class.nodes[i], cost_function.node_cost(egraph, id, node));
+                    }
                 }
+                if node.children().len() == 0 {
+                    let row = model.add_row();
+                    model.set_row_equal(row, 0.);
+                    model.set_weight(row, class.node_depths[i], 1.0);
+                }
+            }
+        }
+
+        for root in roots {
+            for root_node in &vars[root].node_depths {
+                // dunno if this needs to be more complicated
+                // could be too aggressive cause it considers nodes we're not selecting
+                let row = model.add_row();
+                model.set_row_upper(row, depth_bound as f64);
+                model.set_weight(row, *root_node, 1.0);
             }
         }
 
         model.set_obj_sense(Sense::Minimize);
         for class in egraph.classes() {
+            if !alive.contains(&class.id) {
+                continue;
+            }
             for (node, &node_active) in class.iter().zip(&vars[&class.id].nodes) {
                 model.set_obj_coeff(node_active, cost_function.node_cost(egraph, class.id, node));
             }
@@ -143,6 +197,7 @@ where
             egraph,
             model,
             vars,
+            depth_bound
         }
     }
 
@@ -156,11 +211,11 @@ where
     ///
     /// This is just a shortcut for [`LpExtractor::solve_multiple`].
     pub fn solve(&mut self, root: Id) -> RecExpr<L> {
-        self.solve_multiple(&[root]).0
+        self.solve_multiple(&[root]).unwrap().0
     }
 
     /// Extract (potentially multiple) roots
-    pub fn solve_multiple(&mut self, roots: &[Id]) -> (RecExpr<L>, Vec<Id>) {
+    pub fn solve_multiple(&mut self, roots: &[Id]) -> Option<(RecExpr<L>, Vec<Id>)> {
         let egraph = self.egraph;
 
         for class in self.vars.values() {
@@ -190,8 +245,12 @@ where
                 continue;
             }
             let v = &self.vars[&id];
+            let node_idx = v.nodes.iter().position(|&n| solution.col(n) > 0.0);
+            let Some(node_idx) = node_idx else {
+                println!("Failed to unwrap solution for depth bound {}", self.depth_bound);
+                return None;
+            };
             assert!(solution.col(v.active) > 0.0);
-            let node_idx = v.nodes.iter().position(|&n| solution.col(n) > 0.0).unwrap();
             let node = &self.egraph[id].nodes[node_idx];
             if node.all(|child| ids.contains_key(&child)) {
                 let new_id = expr.add(node.clone().map_children(|i| ids[&self.egraph.find(i)]));
@@ -205,7 +264,7 @@ where
         let root_idxs = roots.iter().map(|root| ids[root]).collect();
 
         assert!(expr.is_dag(), "LpExtract found a cyclic term!: {:?}", expr);
-        (expr, root_idxs)
+        Some((expr, root_idxs))
     }
 }
 
@@ -255,7 +314,7 @@ mod tests {
         let f = egraph.add(S::new("f", vec![plus]));
         let g = egraph.add(S::new("g", vec![plus]));
 
-        let mut ext = LpExtractor::new(&egraph, AstSize);
+        let mut ext = LpExtractor::new(&egraph, AstSize, &[f,g], 1);
         ext.timeout(10.0); // way too much time
         let (exp, ids) = ext.solve_multiple(&[f, g]);
         println!("{:?}", exp);
