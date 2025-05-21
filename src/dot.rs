@@ -186,6 +186,7 @@ where
 
         // set compound=true to enable edges to clusters
         writeln!(f, "  compound=true")?;
+        writeln!(f, "  ratio=0.4")?;
         writeln!(f, "  clusterrank=local")?;
 
         for line in &self.config {

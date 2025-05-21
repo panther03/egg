@@ -96,7 +96,7 @@ where
     }
     /// Create an [`LpExtractor`] using costs from the given [`LpCostFunction`].
     /// See those docs for details.
-    pub fn new<CF>(egraph: &'a EGraph<L, N>, mut cost_function: CF, roots: &[Id], depth_bound: usize) -> Self
+    pub fn new<CF>(egraph: &'a EGraph<L, N>, mut cost_function: CF, roots: &[Id], depth_bound: Option<usize>) -> Self
     where
         CF: LpCostFunction<L, N>,
     {
@@ -154,30 +154,36 @@ where
                     model.set_weight(row, node_active, 1.0);
                     model.set_weight(row, child_active, -1.0);
 
-                    for (child_i, child_n) in vars[child].node_depths.iter().enumerate() {
-                        let row = model.add_row();
-                        model.set_row_upper(row, depth_bound as f64);
-                        model.set_weight(row, class.node_depths[i], -1.0);
-                        model.set_weight(row, *child_n, 1.0);
-                        model.set_weight(row, vars[child].nodes[child_i], depth_bound as f64);
-                        model.set_weight(row, class.nodes[i], cost_function.node_cost(egraph, id, node));
+                    if let Some(depth_bound) = depth_bound {
+                        for (child_i, child_n) in vars[child].node_depths.iter().enumerate() {
+                            let row = model.add_row();
+                            model.set_row_upper(row, depth_bound as f64);
+                            model.set_weight(row, class.node_depths[i], -1.0);
+                            model.set_weight(row, *child_n, 1.0);
+                            model.set_weight(row, vars[child].nodes[child_i], depth_bound as f64);
+                            model.set_weight(row, class.nodes[i], cost_function.node_cost(egraph, id, node));
+                        }
                     }
                 }
-                if node.children().len() == 0 {
-                    let row = model.add_row();
-                    model.set_row_equal(row, 0.);
-                    model.set_weight(row, class.node_depths[i], 1.0);
+                if let Some(depth_bound) = depth_bound {
+                    if node.children().len() == 0 {
+                        let row = model.add_row();
+                        model.set_row_equal(row, 0.);
+                        model.set_weight(row, class.node_depths[i], 1.0);
+                    }
                 }
             }
         }
 
-        for root in roots {
-            for root_node in &vars[root].node_depths {
-                // dunno if this needs to be more complicated
-                // could be too aggressive cause it considers nodes we're not selecting
-                let row = model.add_row();
-                model.set_row_upper(row, depth_bound as f64);
-                model.set_weight(row, *root_node, 1.0);
+        if let Some(depth_bound) = depth_bound {
+            for root in roots {
+                for root_node in &vars[root].node_depths {
+                    // dunno if this needs to be more complicated
+                    // could be too aggressive cause it considers nodes we're not selecting
+                    let row = model.add_row();
+                    model.set_row_upper(row, depth_bound as f64);
+                    model.set_weight(row, *root_node, 1.0);
+                }
             }
         }
 
@@ -197,7 +203,7 @@ where
             egraph,
             model,
             vars,
-            depth_bound
+            depth_bound: depth_bound.unwrap_or(0)
         }
     }
 
